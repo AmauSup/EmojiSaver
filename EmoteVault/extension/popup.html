@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>EmoteVault</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>EmoteVault</h1>
+  <div id="login-section">
+    <form id="login-form" style="display:flex;gap:8px;margin-bottom:8px;">
+      <input type="text" id="username-input" placeholder="Pseudo..." style="flex:1;">
+      <button type="submit">Connexion</button>
+    </form>
+    <div id="login-error" style="color:red;font-size:0.9em;"></div>
+  </div>
+  <div id="main-section" style="display:none;">
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input type="text" id="search" placeholder="Rechercher..." style="flex:1;">
+      <select id="platform-filter">
+        <option value="">Toutes</option>
+        <option value="discord">Discord</option>
+        <option value="twitch">Twitch</option>
+        <option value="youtube">YouTube</option>
+        <option value="reddit">Reddit</option>
+        <option value="other">Other</option>
+      </select>
+      <label style="display:flex;align-items:center;font-size:0.9em;gap:2px;">
+        <input type="checkbox" id="fav-filter"> ⭐
+      </label>
+    </div>
+    <div id="discord-link-section" class="discord-builder">
+      <div class="discord-builder-row">
+        <input type="text" id="discord-id-input" placeholder="ID de l'emoji Discord..." class="discord-builder-id">
+        <input type="text" id="discord-name-input" placeholder="Nom à enregistrer" class="discord-builder-name">
+        <button id="discord-link-btn">Générer lien</button>
+      </div>
+      <div class="discord-builder-preview-row">
+        <img id="discord-preview-image" alt="Prévisualisation emoji" style="display:none;" width="40" height="40">
+        <input type="text" id="discord-link-input" readonly placeholder="Le lien CDN généré apparaîtra ici..." class="discord-builder-link">
+      </div>
+      <div class="discord-builder-actions">
+        <span id="discord-format-result"></span>
+        <button id="discord-copy-btn" style="display:none;">Copier URL</button>
+        <button id="discord-save-btn" style="display:none;">Enregistrer</button>
+      </div>
+    </div>
+    <div id="asset-list"></div>
+    <button id="logout-btn" style="margin-top:10px;">Déconnexion</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

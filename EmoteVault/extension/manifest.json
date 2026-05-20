@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "EmoteVault",
+  "version": "1.0.0",
+  "description": "Sauvegardez et gérez vos emojis Discord custom.",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://discord.com/*",
+    "https://discordapp.com/*",
+    "https://media.discordapp.net/*",
+    "https://cdn.discordapp.com/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://discord.com/*", "https://discordapp.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

@@ -1,0 +1,57 @@
+body {
+  font-family: Arial, sans-serif;
+  min-width: 270px;
+  padding: 10px;
+  background: #23272a;
+  color: #fff;
+}
+h1 {
+  font-size: 1.2em;
+  margin-bottom: 10px;
+}
+#search {
+  width: 100%;
+  padding: 5px;
+  border-radius: 4px;
+  border: none;
+}
+#platform-filter {
+  border-radius: 4px;
+  border: none;
+  padding: 4px 6px;
+}
+#fav-filter {
+  accent-color: #ffd700;
+}
+.emoji-item {
+  display: flex;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+  background: #2c2f33;
+  border-radius: 5px;
+  padding: 4px 6px;
+}
+.emoji-item img {
+  border-radius: 4px;
+  background: #23272a;
+  width: 32px;
+  height: 32px;
+}
+.copy-btn, .copy-md-btn, .copy-html-btn, .delete-btn, .fav-btn {
+  background: #7289da;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+  margin-left: 2px;
+  font-size: 0.95em;
+}
+.copy-btn:hover, .copy-md-btn:hover, .copy-html-btn:hover, .delete-btn:hover, .fav-btn:hover {
+  background: #5865f2;
+}
+.fav-btn[style*='#ffd700'] {
+  background: #ffd700;
+  color: #23272a;
+}

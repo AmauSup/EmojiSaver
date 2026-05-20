@@ -1,0 +1,11 @@
+{
+  "name": "emotevault-extension",
+  "version": "1.0.0",
+  "description": "EmoteVault WebExtension",
+  "scripts": {
+    "web-ext:run": "web-ext run --config web-ext.config.js"
+  },
+  "devDependencies": {
+    "web-ext": "^7.8.0"
+  }
+}
