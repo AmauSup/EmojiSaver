@@ -17,14 +17,6 @@
   <div id="main-section" style="display:none;">
     <div style="display:flex; gap:8px; margin-bottom:8px;">
       <input type="text" id="search" placeholder="Rechercher..." style="flex:1;">
-      <select id="platform-filter">
-        <option value="">Toutes</option>
-        <option value="discord">Discord</option>
-        <option value="twitch">Twitch</option>
-        <option value="youtube">YouTube</option>
-        <option value="reddit">Reddit</option>
-        <option value="other">Other</option>
-      </select>
       <label style="display:flex;align-items:center;font-size:0.9em;gap:2px;">
         <input type="checkbox" id="fav-filter"> ⭐
       </label>
@@ -44,6 +36,10 @@
         <button id="discord-copy-btn" style="display:none;">Copier URL</button>
         <button id="discord-save-btn" style="display:none;">Enregistrer</button>
       </div>
+    </div>
+    <div class="auto-save-section">
+      <button id="auto-save-server-btn">Sauvegarder auto (serveur Discord)</button>
+      <span id="auto-save-status"></span>
     </div>
     <div id="asset-list"></div>
     <button id="logout-btn" style="margin-top:10px;">Déconnexion</button>

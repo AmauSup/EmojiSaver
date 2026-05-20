@@ -10,7 +10,6 @@ const loginError = document.getElementById("login-error");
 const mainSection = document.getElementById("main-section");
 const assetListDiv = document.getElementById("asset-list");
 const searchInput = document.getElementById("search");
-const platformFilter = document.getElementById("platform-filter");
 const favFilter = document.getElementById("fav-filter");
 const logoutBtn = document.getElementById("logout-btn");
 const discordIdInput = document.getElementById("discord-id-input");
@@ -21,6 +20,8 @@ const discordFormatResult = document.getElementById("discord-format-result");
 const discordCopyBtn = document.getElementById("discord-copy-btn");
 const discordSaveBtn = document.getElementById("discord-save-btn");
 const discordPreviewImage = document.getElementById("discord-preview-image");
+const autoSaveServerBtn = document.getElementById("auto-save-server-btn");
+const autoSaveStatus = document.getElementById("auto-save-status");
 
 function normalizeDiscordEmojiName(rawName) {
   return (rawName || "")
@@ -86,6 +87,94 @@ async function saveDiscordAsset(asset) {
   }
 
   fetchAssets();
+}
+
+function buildDiscordFormat(emoji) {
+  if (!emoji?.id || !emoji?.name) return null;
+  return emoji.animated ? `<a:${emoji.name}:${emoji.id}>` : `<:${emoji.name}:${emoji.id}>`;
+}
+
+function mapScannedEmojiToAssetPayload(emoji) {
+  const safeName = (emoji.name || `emoji_${emoji.id}`).trim();
+  return {
+    image_url: emoji.url,
+    page_url: emoji.pageUrl || "https://discord.com",
+    platform: "discord",
+    asset_type: emoji.animated ? "emoji_animated" : "emoji",
+    name: safeName,
+    is_animated: !!emoji.animated,
+    source_id: emoji.id,
+    source_metadata: {
+      emoji_id: emoji.id,
+      emoji_name: safeName,
+      discord_format: buildDiscordFormat({ ...emoji, name: safeName }),
+      source: "server-auto-scan"
+    }
+  };
+}
+
+function extractVisibleDiscordEmojisFromActiveTab() {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs?.[0];
+      const tabUrl = activeTab?.url || "";
+
+      if (!activeTab?.id) {
+        reject(new Error("Aucun onglet actif détecté."));
+        return;
+      }
+
+      if (!/https:\/\/(?:www\.)?discord\.com\//.test(tabUrl) && !/https:\/\/(?:www\.)?discordapp\.com\//.test(tabUrl)) {
+        reject(new Error("Ouvre Discord dans l'onglet actif avant de lancer l'extraction."));
+        return;
+      }
+
+      chrome.tabs.sendMessage(activeTab.id, { action: "emotevault_extract_server_emojis" }, (response) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message || "Impossible de contacter la page Discord."));
+          return;
+        }
+
+        if (!response?.success) {
+          reject(new Error(response?.error || "Extraction impossible."));
+          return;
+        }
+
+        resolve(response.emojis || []);
+      });
+    });
+  });
+}
+
+async function saveExtractedEmojis(emojis) {
+  let saved = 0;
+  let duplicates = 0;
+  let failed = 0;
+
+  for (const emoji of emojis) {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...mapScannedEmojiToAssetPayload(emoji),
+          user_id: USER_ID
+        })
+      });
+
+      if (response.ok) {
+        saved += 1;
+      } else if (response.status === 409) {
+        duplicates += 1;
+      } else {
+        failed += 1;
+      }
+    } catch {
+      failed += 1;
+    }
+  }
+
+  return { saved, duplicates, failed };
 }
 
 discordLinkBtn.addEventListener("click", async () => {
@@ -202,6 +291,35 @@ logoutBtn.addEventListener("click", () => {
   });
 });
 
+autoSaveServerBtn.addEventListener("click", async () => {
+  if (!USER_ID) {
+    autoSaveStatus.textContent = "Connecte-toi d'abord.";
+    return;
+  }
+
+  autoSaveServerBtn.disabled = true;
+  autoSaveStatus.textContent = "Scan Discord en cours...";
+
+  try {
+    const emojis = await extractVisibleDiscordEmojisFromActiveTab();
+
+    if (emojis.length === 0) {
+      autoSaveStatus.textContent = "Aucun emoji custom trouvé sur le contenu visible.";
+      autoSaveServerBtn.disabled = false;
+      return;
+    }
+
+    autoSaveStatus.textContent = `${emojis.length} emoji(s) trouvé(s), sauvegarde en cours...`;
+    const result = await saveExtractedEmojis(emojis);
+    autoSaveStatus.textContent = `Terminé: ${result.saved} ajouté(s), ${result.duplicates} déjà présent(s), ${result.failed} erreur(s).`;
+    fetchAssets();
+  } catch (error) {
+    autoSaveStatus.textContent = error?.message || "Erreur pendant la sauvegarde automatique.";
+  } finally {
+    autoSaveServerBtn.disabled = false;
+  }
+});
+
 function renderAssets(assets) {
   assetListDiv.innerHTML = "";
   if (assets.length === 0) {
@@ -209,36 +327,15 @@ function renderAssets(assets) {
     return;
   }
   assets.forEach(asset => {
-    const emojiId = asset.source_id || asset.source_metadata?.emoji_id || "";
-    const emojiName = asset.source_metadata?.emoji_name || asset.name || "emoji";
-    const canCopyRebuiltLink = asset.platform === "discord" && emojiId;
-    const discordExtension = asset.is_animated ? "gif" : "webp";
-    const emojiIdMarkup = emojiId
-      ? `<span style="font-size:0.8em;opacity:0.75;">ID: ${emojiId}</span>`
-      : "";
-    const copyIdButton = emojiId
-      ? `<button class="copy-id-btn" data-id-value="${emojiId}">ID</button>`
-      : "";
-    const rebuiltLink = canCopyRebuiltLink
-      ? buildDiscordEmojiUrl(emojiId, normalizeDiscordEmojiName(emojiName) || "emoji", discordExtension)
-      : "";
-    const copyDiscordLinkButton = canCopyRebuiltLink
-      ? `<button class="copy-discord-link-btn" data-discord-link="${rebuiltLink}">Discord</button>`
-      : "";
+    const fullName = asset.name || "emoji";
+    const displayName = fullName.length > 16 ? `${fullName.slice(0, 15)}…` : fullName;
     const div = document.createElement("div");
     div.className = "emoji-item";
     div.innerHTML = `
-      <img src="${asset.image_url}" alt="${asset.name}" width="32" height="32">
-      <div style="display:flex;flex-direction:column;min-width:0;">
-        <span>${asset.name}</span>
-        ${emojiIdMarkup}
-      </div>
-      <span style="font-size:0.9em;opacity:0.7;">[${asset.platform}]</span>
+      <img src="${asset.image_url}" alt="${fullName}" width="32" height="32">
+      <div class="emoji-name" title="${fullName}">${displayName}</div>
       <button class="copy-btn" data-url="${asset.image_url}">Copier URL</button>
-      ${copyIdButton.replace('>ID<', '>Copier ID<')}
-      ${copyDiscordLinkButton.replace('>Discord<', '>Copier lien Discord<')}
-      <button class="copy-md-btn" data-url="${asset.image_url}" data-name="${asset.name}">Copier MD</button>
-      <button class="copy-html-btn" data-url="${asset.image_url}" data-name="${asset.name}">Copier HTML</button>
+      <button class="edit-btn" data-id="${asset.id}" data-name="${asset.name}">Éditer</button>
       <button class="fav-btn" data-id="${asset.id}" style="color:${asset.is_favorite ? '#ffd700':'#aaa'}">⭐</button>
       <button class="delete-btn" data-id="${asset.id}">🗑️</button>
     `;
@@ -249,9 +346,7 @@ function renderAssets(assets) {
 function fetchAssets() {
   if (!USER_ID) return;
   let url = `${BACKEND_URL}/api/assets?user_id=${USER_ID}`;
-  const platform = platformFilter.value;
   const fav = favFilter.checked;
-  if (platform) url += `&platform=${platform}`;
   if (fav) url += `&is_favorite=true`;
   fetch(url)
     .then(res => res.json())
@@ -272,28 +367,23 @@ function filterAssets() {
 }
 
 searchInput.addEventListener("input", filterAssets);
-platformFilter.addEventListener("change", fetchAssets);
 favFilter.addEventListener("change", fetchAssets);
 
 assetListDiv.addEventListener("click", e => {
   if (e.target.classList.contains("copy-btn")) {
     navigator.clipboard.writeText(e.target.dataset.url);
   }
-  if (e.target.classList.contains("copy-id-btn")) {
-    navigator.clipboard.writeText(e.target.dataset.idValue);
-  }
-  if (e.target.classList.contains("copy-discord-link-btn")) {
-    navigator.clipboard.writeText(e.target.dataset.discordLink);
-  }
-  if (e.target.classList.contains("copy-md-btn")) {
-    const url = e.target.dataset.url;
-    const name = e.target.dataset.name;
-    navigator.clipboard.writeText(`![${name}](${url})`);
-  }
-  if (e.target.classList.contains("copy-html-btn")) {
-    const url = e.target.dataset.url;
-    const name = e.target.dataset.name;
-    navigator.clipboard.writeText(`<img src="${url}" alt="${name}">`);
+  if (e.target.classList.contains("edit-btn")) {
+    const id = e.target.dataset.id;
+    const currentName = e.target.dataset.name || "";
+    const nextName = prompt("Nouveau nom de l'emoji :", currentName);
+    if (!nextName?.trim()) return;
+
+    fetch(`${BACKEND_URL}/api/assets/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: nextName.trim() })
+    }).then(() => fetchAssets());
   }
   if (e.target.classList.contains("delete-btn")) {
     const id = e.target.dataset.id;
