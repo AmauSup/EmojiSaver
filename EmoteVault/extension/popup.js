@@ -3,20 +3,30 @@
 
 const BACKEND_URL = "http://localhost:3000";
 const MAX_NAME_LENGTH = 16;
+const AUTO_SYNC_STORAGE_KEY = "emotevault_auto_sync_enabled";
+const LIVE_REFRESH_INTERVAL_MS = 3500;
+const ITEMS_PER_PAGE = 20;
 
 const state = {
   userId: null,
-  assets: []
+  username: null,
+  assets: [],
+  filteredAssets: [],
+  selectedIds: new Set(),
+  liveRefreshTimer: null,
+  currentPage: 1
 };
 
 const dom = {
   loginSection: document.getElementById("login-section"),
   loginForm: document.getElementById("login-form"),
   usernameInput: document.getElementById("username-input"),
+  passwordInput: document.getElementById("password-input"),
   loginError: document.getElementById("login-error"),
   mainSection: document.getElementById("main-section"),
   assetList: document.getElementById("asset-list"),
   searchInput: document.getElementById("search"),
+  serverFilter: document.getElementById("server-filter"),
   sortFilter: document.getElementById("sort-filter"),
   favFilter: document.getElementById("fav-filter"),
   logoutBtn: document.getElementById("logout-btn"),
@@ -29,7 +39,22 @@ const dom = {
   discordSaveBtn: document.getElementById("discord-save-btn"),
   discordPreviewImage: document.getElementById("discord-preview-image"),
   autoSaveServerBtn: document.getElementById("auto-save-server-btn"),
-  autoSaveStatus: document.getElementById("auto-save-status")
+  autoSaveStatus: document.getElementById("auto-save-status"),
+  accountDetails: document.getElementById("account-details"),
+  currentPwdInput: document.getElementById("current-pwd-input"),
+  newUsernameInput: document.getElementById("new-username-input"),
+  changeUsernameBtn: document.getElementById("change-username-btn"),
+  newPwdInput: document.getElementById("new-pwd-input"),
+  changePwdBtn: document.getElementById("change-pwd-btn"),
+  accountStatus: document.getElementById("account-status"),
+  bulkBar: document.getElementById("bulk-bar"),
+  bulkCount: document.getElementById("bulk-count"),
+  bulkDeleteBtn: document.getElementById("bulk-delete-btn"),
+  selectAllCb: document.getElementById("select-all-cb"),
+  pagination: document.getElementById("pagination"),
+  pagePrev: document.getElementById("page-prev"),
+  pageNext: document.getElementById("page-next"),
+  pageInfo: document.getElementById("page-info")
 };
 
 function setHidden(element, hidden) {
@@ -54,27 +79,22 @@ function buildDiscordEmojiUrl(emojiId, emojiName, extension) {
   return `https://cdn.discordapp.com/emojis/${emojiId}.${extension}?size=48&name=${encodedName}&lossless=true`;
 }
 
-function buildDiscordFormat(emoji) {
-  if (!emoji?.id || !emoji?.name) return null;
-  return emoji.animated ? `<a:${emoji.name}:${emoji.id}>` : `<:${emoji.name}:${emoji.id}>`;
-}
-
 async function apiRequest(path, options = {}) {
   const response = await fetch(`${BACKEND_URL}${path}`, options);
   const body = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(body.error || "Erreur serveur.");
+    throw new Error(body.error || "Server error.");
   }
 
   return body;
 }
 
-async function createOrLoginUser(username) {
+async function createOrLoginUser(username, password) {
   const body = await apiRequest("/api/users", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username })
+    body: JSON.stringify({ username, password })
   });
 
   return body.user;
@@ -112,37 +132,93 @@ async function deleteAsset(assetId) {
 
 function mapScannedEmojiToAssetPayload(emoji) {
   const safeName = (emoji.name || `emoji_${emoji.id}`).trim();
-
   return {
     image_url: emoji.url,
-    page_url: emoji.pageUrl || "https://discord.com",
     platform: "discord",
-    asset_type: emoji.animated ? "emoji_animated" : "emoji",
     name: safeName,
-    is_animated: !!emoji.animated,
-    source_id: emoji.id,
-    source_metadata: {
-      emoji_id: emoji.id,
-      emoji_name: safeName,
-      discord_format: buildDiscordFormat({ ...emoji, name: safeName }),
-      source: "server-auto-scan"
-    }
+    server_id: emoji.server_id || null,
+    server_name: emoji.server_name || null,
+    is_animated: !!emoji.animated
   };
+}
+
+function normalizeServerLabel(asset) {
+  return asset.server_name || asset.server_id || "No server";
+}
+
+function normalizeServerKey(asset) {
+  return asset.server_id || "__unknown__";
+}
+
+function rebuildServerFilterOptions(assets) {
+  const selected = dom.serverFilter.value || "";
+  const byServer = new Map();
+
+  assets.forEach((asset) => {
+    const key = normalizeServerKey(asset);
+    if (!byServer.has(key)) {
+      byServer.set(key, normalizeServerLabel(asset));
+    }
+  });
+
+  const entries = Array.from(byServer.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+
+  dom.serverFilter.innerHTML = '<option value="">All servers</option>';
+  entries.forEach(([key, label]) => {
+    const option = document.createElement("option");
+    option.value = key;
+    option.textContent = label;
+    dom.serverFilter.appendChild(option);
+  });
+
+  if (Array.from(dom.serverFilter.options).some((opt) => opt.value === selected)) {
+    dom.serverFilter.value = selected;
+  }
+}
+
+function updateBulkBar() {
+  const count = state.selectedIds.size;
+  setHidden(dom.bulkBar, count === 0);
+  dom.bulkCount.textContent = `${count} selected`;
+
+  const pageCbs = Array.from(dom.assetList.querySelectorAll(".select-cb"));
+  const allChecked = pageCbs.length > 0 && pageCbs.every((cb) => state.selectedIds.has(cb.dataset.id));
+  const someChecked = pageCbs.some((cb) => state.selectedIds.has(cb.dataset.id));
+  dom.selectAllCb.checked = allChecked;
+  dom.selectAllCb.indeterminate = someChecked && !allChecked;
 }
 
 function showMainView() {
   setHidden(dom.loginSection, true);
   setHidden(dom.mainSection, false);
+  startLiveRefresh();
 }
 
 function showLoginView() {
   setHidden(dom.loginSection, false);
   setHidden(dom.mainSection, true);
+  stopLiveRefresh();
 }
 
-function setUserId(userId) {
-  state.userId = userId;
-  chrome.storage.local.set({ emotevault_user_id: userId });
+function startLiveRefresh() {
+  stopLiveRefresh();
+  state.liveRefreshTimer = globalThis.setInterval(() => {
+    if (state.userId) {
+      refreshAssets();
+    }
+  }, LIVE_REFRESH_INTERVAL_MS);
+}
+
+function stopLiveRefresh() {
+  if (!state.liveRefreshTimer) return;
+  globalThis.clearInterval(state.liveRefreshTimer);
+  state.liveRefreshTimer = null;
+}
+
+function setUserData(user) {
+  state.userId = user.id;
+  state.username = user.username;
+  chrome.storage.local.set({ emotevault_user_id: user.id, emotevault_username: user.username });
 }
 
 function clearDiscordBuilder(message = "") {
@@ -185,7 +261,7 @@ function extractVisibleDiscordEmojisFromActiveTab() {
       const tabUrl = activeTab?.url || "";
 
       if (!activeTab?.id) {
-        reject(new Error("Aucun onglet actif détecté."));
+        reject(new Error("No active tab detected."));
         return;
       }
 
@@ -193,18 +269,18 @@ function extractVisibleDiscordEmojisFromActiveTab() {
         || /https:\/\/(?:www\.)?discordapp\.com\//.test(tabUrl);
 
       if (!isDiscordTab) {
-        reject(new Error("Ouvre Discord dans l'onglet actif avant de lancer l'extraction."));
+        reject(new Error("Open Discord in the active tab first."));
         return;
       }
 
       chrome.tabs.sendMessage(activeTab.id, { action: "emotevault_extract_server_emojis" }, (response) => {
         if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message || "Impossible de contacter la page Discord."));
+          reject(new Error(chrome.runtime.lastError.message || "Could not contact Discord page."));
           return;
         }
 
         if (!response?.success) {
-          reject(new Error(response?.error || "Extraction impossible."));
+          reject(new Error(response?.error || "Extraction failed."));
           return;
         }
 
@@ -238,22 +314,36 @@ async function saveExtractedEmojis(emojis) {
 function renderAssets(assets) {
   dom.assetList.innerHTML = "";
 
+  const totalPages = Math.max(1, Math.ceil(assets.length / ITEMS_PER_PAGE));
+  if (state.currentPage > totalPages) state.currentPage = totalPages;
+
   if (assets.length === 0) {
-    dom.assetList.innerHTML = "<p>Aucun asset sauvegardé.</p>";
+    dom.assetList.innerHTML = "<p>No saved emojis.</p>";
+    setHidden(dom.pagination, true);
+    updateBulkBar();
     return;
   }
 
-  assets.forEach((asset) => {
+  const start = (state.currentPage - 1) * ITEMS_PER_PAGE;
+  const pageAssets = assets.slice(start, start + ITEMS_PER_PAGE);
+
+  pageAssets.forEach((asset) => {
     const fullName = asset.name || "emoji";
     const displayName = truncateName(fullName);
-    const favoriteColor = asset.is_favorite ? "#7289da" : "#99aab5";
+    const favoriteColor = asset.is_favorite ? "#ffd700" : "#99aab5";
+    const serverLabel = asset.server_name || "";
+    const isSelected = state.selectedIds.has(asset.id);
     const item = document.createElement("div");
 
     item.className = "emoji-item";
     item.innerHTML = `
+      <input type="checkbox" class="select-cb" data-id="${asset.id}"${isSelected ? " checked" : ""}>
       <img src="${asset.image_url}" alt="${fullName}" width="32" height="32">
-      <div class="emoji-name" title="${fullName}">${displayName}</div>
-      <button class="copy-btn" data-url="${asset.image_url}">URL</button>
+      <div class="emoji-meta">
+        <div class="emoji-name" title="${fullName}">${displayName}</div>
+        ${serverLabel ? `<div class="emoji-server">${serverLabel}</div>` : ""}
+      </div>
+      <button class="copy-btn" data-url="${asset.image_url}">Copy</button>
       <button class="edit-btn" data-id="${asset.id}" data-name="${fullName}">Edit</button>
       <button class="fav-btn" data-id="${asset.id}" data-favorite="${asset.is_favorite ? "true" : "false"}" style="color:${favoriteColor}">★</button>
       <button class="delete-btn" data-id="${asset.id}">✕</button>
@@ -261,11 +351,26 @@ function renderAssets(assets) {
 
     dom.assetList.appendChild(item);
   });
+
+  const showPagination = totalPages > 1;
+  setHidden(dom.pagination, !showPagination);
+  if (showPagination) {
+    dom.pageInfo.textContent = `${state.currentPage} / ${totalPages}`;
+    dom.pagePrev.disabled = state.currentPage <= 1;
+    dom.pageNext.disabled = state.currentPage >= totalPages;
+  }
+
+  updateBulkBar();
 }
 
 function filterAndRenderAssets() {
   const query = dom.searchInput.value.toLowerCase();
   let filtered = [...state.assets];
+  const selectedServer = dom.serverFilter.value;
+
+  if (selectedServer) {
+    filtered = filtered.filter((asset) => normalizeServerKey(asset) === selectedServer);
+  }
 
   if (query) {
     filtered = filtered.filter((asset) => (asset.name || "").toLowerCase().includes(query));
@@ -275,8 +380,13 @@ function filterAndRenderAssets() {
     filtered.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
   } else if (dom.sortFilter.value === "name-desc") {
     filtered.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
+  } else if (dom.sortFilter.value === "server-asc") {
+    filtered.sort((a, b) => normalizeServerLabel(a).localeCompare(normalizeServerLabel(b)));
+  } else if (dom.sortFilter.value === "server-desc") {
+    filtered.sort((a, b) => normalizeServerLabel(b).localeCompare(normalizeServerLabel(a)));
   }
 
+  state.filteredAssets = filtered;
   renderAssets(filtered);
 }
 
@@ -285,9 +395,10 @@ async function refreshAssets() {
 
   try {
     state.assets = await fetchAssetsForUser();
+    rebuildServerFilterOptions(state.assets);
     filterAndRenderAssets();
   } catch {
-    dom.assetList.innerHTML = "<p>Erreur de chargement.</p>";
+    dom.assetList.innerHTML = "<p>Loading error.</p>";
   }
 }
 
@@ -296,79 +407,170 @@ async function handleDiscordBuilderClick() {
   const emojiName = normalizeDiscordEmojiName(dom.discordNameInput.value) || "emoji";
 
   if (!/^\d{5,}$/.test(emojiId)) {
-    clearDiscordBuilder("ID invalide.");
+    clearDiscordBuilder("Invalid ID.");
     return;
   }
 
   dom.discordNameInput.value = emojiName;
-  dom.discordFormatResult.textContent = "Chargement de la prévisualisation...";
+  dom.discordFormatResult.textContent = "Loading preview...";
 
   try {
     const { imageUrl, isAnimated } = await resolveDiscordEmojiAsset(emojiId, emojiName);
     dom.discordLinkInput.value = imageUrl;
     dom.discordPreviewImage.src = imageUrl;
     setHidden(dom.discordPreviewImage, false);
-    dom.discordFormatResult.textContent = isAnimated ? "Emoji animé détecté." : "Emoji statique détecté.";
+    dom.discordFormatResult.textContent = isAnimated ? "Animated emoji." : "Static emoji.";
     setHidden(dom.discordCopyBtn, false);
     setHidden(dom.discordSaveBtn, false);
 
     dom.discordCopyBtn.onclick = () => navigator.clipboard.writeText(imageUrl);
     dom.discordSaveBtn.onclick = async () => {
+      dom.discordSaveBtn.disabled = true;
       try {
         await createAsset({
           image_url: imageUrl,
-          page_url: "https://discord.com",
           platform: "discord",
-          asset_type: isAnimated ? "emoji_animated" : "emoji",
           name: emojiName,
-          is_animated: isAnimated,
-          source_id: emojiId,
-          source_metadata: {
-            emoji_id: emojiId,
-            emoji_name: emojiName,
-            generated_from: "popup-id-builder"
-          }
+          server_id: null,
+          server_name: null,
+          is_animated: isAnimated
         });
+        dom.discordFormatResult.textContent = "Saved!";
         refreshAssets();
-        alert("Emoji enregistré dans EmoteVault !");
       } catch (error) {
-        alert(error.message || "Erreur lors de l'enregistrement.");
+        dom.discordFormatResult.textContent = error.message || "Save failed.";
+      } finally {
+        dom.discordSaveBtn.disabled = false;
       }
     };
   } catch {
-    clearDiscordBuilder("Impossible de prévisualiser cet emoji avec cet ID.");
+    clearDiscordBuilder("Could not preview emoji with this ID.");
   }
 }
 
 async function handleAutoSaveClick() {
   if (!state.userId) {
-    dom.autoSaveStatus.textContent = "Connecte-toi d'abord.";
+    dom.autoSaveStatus.textContent = "Log in first.";
     return;
   }
 
-  dom.autoSaveServerBtn.disabled = true;
-  dom.autoSaveStatus.textContent = "Scan Discord en cours...";
+  const currentEnabled = await new Promise((resolve) => {
+    chrome.storage.local.get([AUTO_SYNC_STORAGE_KEY], (result) => {
+      resolve(!!result[AUTO_SYNC_STORAGE_KEY]);
+    });
+  });
 
+  const nextEnabled = !currentEnabled;
+  chrome.storage.local.set({ [AUTO_SYNC_STORAGE_KEY]: nextEnabled });
+
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const activeTab = tabs?.[0];
+    if (!activeTab?.id) return;
+
+    chrome.tabs.sendMessage(activeTab.id, {
+      type: "emotevault:auto-sync:set",
+      enabled: nextEnabled
+    }, () => {
+      if (chrome.runtime.lastError) {
+        return;
+      }
+    });
+  });
+
+  dom.autoSaveServerBtn.textContent = nextEnabled ? "Disable auto-save" : "Enable auto-save";
+  dom.autoSaveStatus.textContent = nextEnabled ? "Auto-save enabled." : "Auto-save disabled.";
+}
+
+function loadAutoSaveState() {
+  chrome.storage.local.get([AUTO_SYNC_STORAGE_KEY], (result) => {
+    const enabled = !!result[AUTO_SYNC_STORAGE_KEY];
+    dom.autoSaveServerBtn.textContent = enabled ? "Disable auto-save" : "Enable auto-save";
+  });
+}
+
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !changes[AUTO_SYNC_STORAGE_KEY]) return;
+
+  const enabled = !!changes[AUTO_SYNC_STORAGE_KEY].newValue;
+  dom.autoSaveServerBtn.textContent = enabled ? "Disable auto-save" : "Enable auto-save";
+});
+
+async function handleChangeUsername() {
+  const newUsername = dom.newUsernameInput.value.trim();
+  const currentPwd = dom.currentPwdInput.value;
+
+  if (!currentPwd) { dom.accountStatus.textContent = "Current password required."; return; }
+  if (!newUsername) { dom.accountStatus.textContent = "New username required."; return; }
+
+  dom.accountStatus.textContent = "";
   try {
-    const emojis = await extractVisibleDiscordEmojisFromActiveTab();
-    if (emojis.length === 0) {
-      dom.autoSaveStatus.textContent = "Aucun emoji custom trouvé sur le contenu visible.";
-      return;
-    }
-
-    dom.autoSaveStatus.textContent = `${emojis.length} emoji(s) trouvé(s), sauvegarde en cours...`;
-    const result = await saveExtractedEmojis(emojis);
-    dom.autoSaveStatus.textContent = `Terminé: ${result.saved} ajouté(s), ${result.duplicates} déjà présent(s), ${result.failed} erreur(s).`;
-    refreshAssets();
-  } catch (error) {
-    dom.autoSaveStatus.textContent = error?.message || "Erreur pendant la sauvegarde automatique.";
-  } finally {
-    dom.autoSaveServerBtn.disabled = false;
+    const body = await apiRequest(`/api/users/${state.userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: currentPwd, new_username: newUsername })
+    });
+    state.username = body.user.username;
+    chrome.storage.local.set({ emotevault_username: state.username });
+    dom.accountStatus.textContent = "Username updated.";
+    dom.newUsernameInput.value = "";
+  } catch (err) {
+    dom.accountStatus.textContent = err.message || "Update failed.";
   }
+}
+
+async function handleChangePassword() {
+  const currentPwd = dom.currentPwdInput.value;
+  const newPwd = dom.newPwdInput.value;
+
+  if (!currentPwd) { dom.accountStatus.textContent = "Current password required."; return; }
+  if (!newPwd) { dom.accountStatus.textContent = "New password required."; return; }
+
+  dom.accountStatus.textContent = "";
+  try {
+    await apiRequest(`/api/users/${state.userId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ current_password: currentPwd, new_password: newPwd })
+    });
+    dom.accountStatus.textContent = "Password updated.";
+    dom.currentPwdInput.value = "";
+    dom.newPwdInput.value = "";
+  } catch (err) {
+    dom.accountStatus.textContent = err.message || "Update failed.";
+  }
+}
+
+async function handleBulkDelete() {
+  if (state.selectedIds.size === 0) return;
+  dom.bulkDeleteBtn.disabled = true;
+  for (const id of Array.from(state.selectedIds)) {
+    await deleteAsset(id).catch(() => {});
+  }
+  state.selectedIds.clear();
+  await refreshAssets();
+  updateBulkBar();
+  dom.bulkDeleteBtn.disabled = false;
+}
+
+function handleSelectAll() {
+  const pageCbs = dom.assetList.querySelectorAll(".select-cb");
+  if (dom.selectAllCb.checked) {
+    pageCbs.forEach((cb) => { state.selectedIds.add(cb.dataset.id); cb.checked = true; });
+  } else {
+    pageCbs.forEach((cb) => { state.selectedIds.delete(cb.dataset.id); cb.checked = false; });
+  }
+  updateBulkBar();
 }
 
 async function handleAssetListClick(event) {
   const target = event.target;
+
+  if (target.classList.contains("select-cb")) {
+    if (target.checked) state.selectedIds.add(target.dataset.id);
+    else state.selectedIds.delete(target.dataset.id);
+    updateBulkBar();
+    return;
+  }
 
   if (target.classList.contains("copy-btn")) {
     navigator.clipboard.writeText(target.dataset.url || "");
@@ -378,7 +580,7 @@ async function handleAssetListClick(event) {
   if (target.classList.contains("edit-btn")) {
     const assetId = target.dataset.id;
     const currentName = target.dataset.name || "";
-    const nextName = prompt("Nouveau nom de l'emoji :", currentName);
+    const nextName = prompt("New emoji name:", currentName);
     if (!nextName?.trim()) return;
 
     await updateAsset(assetId, { name: nextName.trim() });
@@ -389,6 +591,7 @@ async function handleAssetListClick(event) {
   if (target.classList.contains("delete-btn")) {
     const assetId = target.dataset.id;
     await deleteAsset(assetId);
+    state.selectedIds.delete(assetId);
     refreshAssets();
     return;
   }
@@ -404,32 +607,40 @@ async function handleAssetListClick(event) {
 async function handleLoginSubmit(event) {
   event.preventDefault();
   const username = dom.usernameInput.value.trim();
+  const password = dom.passwordInput.value;
 
   if (!username) {
-    dom.loginError.textContent = "Pseudo requis.";
+    dom.loginError.textContent = "Username required.";
+    return;
+  }
+
+  if (!password) {
+    dom.loginError.textContent = "Password required.";
     return;
   }
 
   dom.loginError.textContent = "";
   try {
-    const user = await createOrLoginUser(username);
+    const user = await createOrLoginUser(username, password);
     if (!user?.id) {
-      dom.loginError.textContent = "Erreur lors de la connexion.";
+      dom.loginError.textContent = "Login error.";
       return;
     }
 
-    setUserId(user.id);
+    setUserData(user);
     showMainView();
     refreshAssets();
-  } catch {
-    dom.loginError.textContent = "Erreur réseau.";
+  } catch (err) {
+    dom.loginError.textContent = err.message || "Network error.";
   }
 }
 
 function handleLogout() {
-  chrome.storage.local.remove(["emotevault_user_id"], () => {
+  chrome.storage.local.remove(["emotevault_user_id", "emotevault_username"], () => {
     state.userId = null;
+    state.username = null;
     state.assets = [];
+    state.selectedIds.clear();
     showLoginView();
   });
 }
@@ -437,22 +648,41 @@ function handleLogout() {
 function bindEvents() {
   dom.loginForm.addEventListener("submit", handleLoginSubmit);
   dom.logoutBtn.addEventListener("click", handleLogout);
-  dom.searchInput.addEventListener("input", filterAndRenderAssets);
-  dom.sortFilter.addEventListener("change", filterAndRenderAssets);
+  dom.searchInput.addEventListener("input", () => { state.currentPage = 1; filterAndRenderAssets(); });
+  dom.serverFilter.addEventListener("change", () => { state.currentPage = 1; filterAndRenderAssets(); });
+  dom.sortFilter.addEventListener("change", () => { state.currentPage = 1; filterAndRenderAssets(); });
   dom.favFilter.addEventListener("change", refreshAssets);
+  dom.pagePrev.addEventListener("click", () => {
+    if (state.currentPage > 1) {
+      state.currentPage--;
+      renderAssets(state.filteredAssets);
+    }
+  });
+  dom.pageNext.addEventListener("click", () => {
+    const totalPages = Math.max(1, Math.ceil(state.filteredAssets.length / ITEMS_PER_PAGE));
+    if (state.currentPage < totalPages) {
+      state.currentPage++;
+      renderAssets(state.filteredAssets);
+    }
+  });
+  dom.changeUsernameBtn.addEventListener("click", () => handleChangeUsername().catch(() => {}));
+  dom.changePwdBtn.addEventListener("click", () => handleChangePassword().catch(() => {}));
+  dom.bulkDeleteBtn.addEventListener("click", () => handleBulkDelete().catch(() => {}));
+  dom.selectAllCb.addEventListener("change", handleSelectAll);
   dom.discordLinkBtn.addEventListener("click", handleDiscordBuilderClick);
   dom.autoSaveServerBtn.addEventListener("click", handleAutoSaveClick);
   dom.assetList.addEventListener("click", (event) => {
     handleAssetListClick(event).catch(() => {
-      dom.autoSaveStatus.textContent = "Action impossible pour le moment.";
+      dom.autoSaveStatus.textContent = "Action failed.";
     });
   });
 }
 
 function tryAutoLogin() {
-  chrome.storage.local.get(["emotevault_user_id"], (result) => {
+  chrome.storage.local.get(["emotevault_user_id", "emotevault_username"], (result) => {
     if (result.emotevault_user_id) {
       state.userId = result.emotevault_user_id;
+      state.username = result.emotevault_username || "";
       showMainView();
       refreshAssets();
       return;
@@ -463,4 +693,5 @@ function tryAutoLogin() {
 }
 
 bindEvents();
+loadAutoSaveState();
 tryAutoLogin();

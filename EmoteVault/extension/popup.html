@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>EmoteVault</title>
@@ -8,46 +8,81 @@
 <body>
   <h1>EmoteVault</h1>
   <div id="login-section">
-    <form id="login-form" class="row">
-      <input type="text" id="username-input" placeholder="Pseudo..." class="grow">
-      <button type="submit" class="btn">Connexion</button>
+    <form id="login-form">
+      <input type="text" id="username-input" placeholder="Username...">
+      <input type="password" id="password-input" placeholder="Password...">
+      <button type="submit" class="btn">Login</button>
     </form>
     <div id="login-error" class="error-text"></div>
   </div>
   <div id="main-section" class="hidden">
     <div class="row">
-      <input type="text" id="search" placeholder="Rechercher..." class="grow">
-       <select id="sort-filter" class="sort-select">
-         <option value="recent">Récent</option>
-         <option value="name-asc">Nom A → Z</option>
-         <option value="name-desc">Nom Z → A</option>
-       </select>
+      <input type="text" id="search" placeholder="Search..." class="grow">
       <label class="fav-label">
         <input type="checkbox" id="fav-filter"> ⭐
       </label>
     </div>
+    <div class="row">
+      <select id="server-filter" class="sort-select grow">
+        <option value="">All servers</option>
+      </select>
+      <select id="sort-filter" class="sort-select">
+        <option value="recent">Recent</option>
+        <option value="name-asc">A → Z</option>
+        <option value="name-desc">Z → A</option>
+        <option value="server-asc">Srv A → Z</option>
+        <option value="server-desc">Srv Z → A</option>
+      </select>
+    </div>
     <div id="discord-link-section" class="discord-builder">
       <div class="discord-builder-row">
-        <input type="text" id="discord-id-input" placeholder="ID de l'emoji Discord..." class="discord-builder-id">
-        <input type="text" id="discord-name-input" placeholder="Nom à enregistrer" class="discord-builder-name">
-         <button id="discord-link-btn" class="btn">Générer lien</button>
+        <input type="text" id="discord-id-input" placeholder="Discord emoji ID..." class="discord-builder-id">
+        <input type="text" id="discord-name-input" placeholder="Name" class="discord-builder-name">
+        <button id="discord-link-btn" class="btn">Preview</button>
       </div>
       <div class="discord-builder-preview-row">
-        <img id="discord-preview-image" alt="Prévisualisation emoji" class="hidden" width="40" height="40">
-        <input type="text" id="discord-link-input" readonly placeholder="Le lien CDN généré apparaîtra ici..." class="discord-builder-link">
+        <img id="discord-preview-image" alt="Emoji preview" class="hidden" width="40" height="40">
+        <input type="text" id="discord-link-input" readonly placeholder="CDN link will appear here..." class="discord-builder-link">
       </div>
       <div class="discord-builder-actions">
         <span id="discord-format-result"></span>
-        <button id="discord-copy-btn" class="btn hidden">Copier URL</button>
-        <button id="discord-save-btn" class="btn hidden">Enregistrer</button>
+        <button id="discord-copy-btn" class="btn hidden">Copy</button>
+        <button id="discord-save-btn" class="btn hidden">Save</button>
       </div>
     </div>
     <div class="auto-save-section">
-      <button id="auto-save-server-btn" class="btn">Sauvegarder auto (serveur Discord)</button>
+      <button id="auto-save-server-btn" class="btn">Enable auto-save</button>
       <span id="auto-save-status"></span>
     </div>
+    <div id="bulk-bar" class="bulk-bar hidden">
+      <label class="bulk-select-all">
+        <input type="checkbox" id="select-all-cb"> All
+      </label>
+      <span id="bulk-count"></span>
+      <button id="bulk-delete-btn" class="btn danger">Delete</button>
+    </div>
     <div id="asset-list"></div>
-    <button id="logout-btn" class="btn danger top-space">Déconnexion</button>
+    <div id="pagination" class="pagination hidden">
+      <button id="page-prev" class="btn">‹</button>
+      <span id="page-info"></span>
+      <button id="page-next" class="btn">›</button>
+    </div>
+    <details id="account-details">
+      <summary>⚙ Account</summary>
+      <div class="account-panel">
+        <input type="password" id="current-pwd-input" placeholder="Current password...">
+        <div class="row account-row">
+          <input type="text" id="new-username-input" placeholder="New username..." class="grow">
+          <button id="change-username-btn" class="btn">Rename</button>
+        </div>
+        <div class="row account-row">
+          <input type="password" id="new-pwd-input" placeholder="New password..." class="grow">
+          <button id="change-pwd-btn" class="btn">Update</button>
+        </div>
+        <div id="account-status" class="account-status"></div>
+      </div>
+    </details>
+    <button id="logout-btn" class="btn danger top-space">Log out</button>
   </div>
   <script src="popup.js"></script>
 </body>
