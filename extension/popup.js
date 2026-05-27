@@ -1,5 +1,11 @@
-// EmoteVault - popup.js
-// Structure: state -> DOM -> utils -> API -> features -> render -> handlers -> init
+// popup.js — Interface utilisateur de l'extension EmoteVault.
+// Structure : state → DOM → utils → API → features → render → handlers → init
+//
+// L'état (assets, filtres, sélection) est maintenu en mémoire dans `state`.
+// Le filtrage et le tri sont entièrement côté client (assets déjà chargés).
+// Le rafraîchissement automatique (startLiveRefresh) tourne toutes les 3,5 s.
+// TODO: externaliser BACKEND_URL (actuellement codé en dur)
+// TODO: remplacer l'auth par JWT (actuellement user_id stocké dans chrome.storage.local)
 
 const BACKEND_URL = "http://localhost:3000";
 const MAX_NAME_LENGTH = 16;
@@ -79,6 +85,8 @@ function buildDiscordEmojiUrl(emojiId, emojiName, extension) {
   return `https://cdn.discordapp.com/emojis/${emojiId}.${extension}?size=48&name=${encodedName}&lossless=true`;
 }
 
+// Wrapper centralisé pour tous les appels au backend.
+// Lève une Error avec le message d'erreur de l'API si le statut HTTP n'est pas ok.
 async function apiRequest(path, options = {}) {
   const response = await fetch(`${BACKEND_URL}${path}`, options);
   const body = await response.json().catch(() => ({}));
@@ -200,6 +208,8 @@ function showLoginView() {
   stopLiveRefresh();
 }
 
+// Rafraîchissement périodique pour refléter les emojis sauvegardés par l'auto-sync
+// ou le clic droit pendant que le popup est ouvert.
 function startLiveRefresh() {
   stopLiveRefresh();
   state.liveRefreshTimer = globalThis.setInterval(() => {
@@ -241,6 +251,8 @@ function probeImage(url) {
   });
 }
 
+// Détecte si un emoji est animé en sondant d'abord l'URL GIF.
+// Si le chargement GIF réussit → animé ; sinon → statique (webp).
 async function resolveDiscordEmojiAsset(emojiId, emojiName) {
   const gifUrl = buildDiscordEmojiUrl(emojiId, emojiName, "gif");
   const webpUrl = buildDiscordEmojiUrl(emojiId, emojiName, "webp");
@@ -254,6 +266,8 @@ async function resolveDiscordEmojiAsset(emojiId, emojiName) {
   }
 }
 
+// Envoie un message au content script de l'onglet actif pour extraire les emojis visibles.
+// Vérifie d'abord que l'onglet est sur Discord (content.js n'est injecté que sur discord.com).
 function extractVisibleDiscordEmojisFromActiveTab() {
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -311,6 +325,8 @@ async function saveExtractedEmojis(emojis) {
   return { saved, duplicates, failed };
 }
 
+// Rendu paginé côté client (ITEMS_PER_PAGE = 20).
+// Tous les assets sont en mémoire ; la pagination ne déclenche pas de requête API.
 function renderAssets(assets) {
   dom.assetList.innerHTML = "";
 
@@ -363,6 +379,8 @@ function renderAssets(assets) {
   updateBulkBar();
 }
 
+// Filtrage et tri entièrement côté client sur state.assets (déjà en mémoire).
+// Exception : le filtre favori déclenche un rechargement API car il est géré par le backend.
 function filterAndRenderAssets() {
   const query = dom.searchInput.value.toLowerCase();
   let filtered = [...state.assets];
@@ -448,6 +466,9 @@ async function handleDiscordBuilderClick() {
   }
 }
 
+// L'auto-save nécessite deux actions synchronisées :
+// 1. Mettre à jour chrome.storage.local (lu par content.js au prochain démarrage)
+// 2. Envoyer un message au content script pour activer/désactiver immédiatement
 async function handleAutoSaveClick() {
   if (!state.userId) {
     dom.autoSaveStatus.textContent = "Log in first.";
@@ -678,6 +699,8 @@ function bindEvents() {
   });
 }
 
+// Restaure la session depuis chrome.storage.local si l'utilisateur était connecté.
+// Pas de vérification côté serveur : la session est valide tant que l'user_id existe en base.
 function tryAutoLogin() {
   chrome.storage.local.get(["emotevault_user_id", "emotevault_username"], (result) => {
     if (result.emotevault_user_id) {

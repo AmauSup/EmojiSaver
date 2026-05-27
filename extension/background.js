@@ -1,6 +1,16 @@
-// EmoteVault - background.js
-// Service Worker pour gérer le menu contextuel et la communication avec le content script
+// background.js — Service worker EmoteVault (Manifest V3).
+//
+// Responsabilités :
+//   1. Enregistrer le menu contextuel (clic droit sur une image)
+//   2. Relayer les actions vers l'API backend (content.js délègue les appels réseau ici)
+//   3. Sauvegarder les emojis unitairement (SAVE_ASSET) ou en lot (SAVE_DISCORD_EMOJIS)
+//
+// Contrainte MV3 : le service worker peut s'endormir entre deux événements.
+// Aucun état ne doit être conservé en mémoire entre les appels.
+// TODO: externaliser BACKEND_URL (actuellement codé en dur à http://localhost:3000)
 
+// Les menus contextuels doivent être (re)créés dans onInstalled.
+// En MV3, le service worker peut redémarrer et perdre les menus s'ils sont créés ailleurs.
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "emotevault-save-asset",
@@ -14,6 +24,8 @@ chrome.runtime.onInstalled.addListener(() => {
   });
 });
 
+// Le service worker ne peut pas accéder au DOM directement.
+// Il délègue l'action au content script via chrome.tabs.sendMessage.
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "emotevault-save-asset") {
     chrome.tabs.sendMessage(tab.id, {
@@ -29,6 +41,8 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // SAVE_ASSET : sauvegarde un emoji unique (clic droit ou Discord Builder).
+  // L'user_id est lu depuis chrome.storage.local (pas de JWT pour l'instant).
   if (request.type === "SAVE_ASSET" && request.asset) {
     chrome.storage.local.get(["emotevault_user_id"], (result) => {
       const user_id = result.emotevault_user_id;
@@ -52,9 +66,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         })
         .catch((err) => sendResponse({ success: false, error: err.toString() }));
     });
+    // return true est obligatoire pour garder le canal sendResponse ouvert
+    // après une opération asynchrone (fetch + chrome.storage) en MV3.
     return true;
   }
 
+  // SAVE_DISCORD_EMOJIS : sauvegarde en lot depuis l'auto-sync du content script.
+  // Les 409 (doublon déjà sauvegardé) sont comptés mais ignorés silencieusement.
   if (request.type === "SAVE_DISCORD_EMOJIS" && Array.isArray(request.emojis)) {
     chrome.storage.local.get(["emotevault_user_id"], async (result) => {
       const user_id = result.emotevault_user_id;
@@ -99,6 +117,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
       sendResponse({ success: true, saved, duplicates, failed });
     });
-    return true;
+    return true; // canal sendResponse ouvert pour la réponse asynchrone
   }
 });

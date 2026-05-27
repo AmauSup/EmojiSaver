@@ -1,5 +1,10 @@
-// EmoteVault - content.js
-// Intercepte le clic droit sur une image, détecte la plateforme/type, et envoie au backend
+// content.js — Script injecté dans Discord Web.
+//
+// Responsabilités :
+//   1. Scanner le DOM pour les emojis Discord (images CDN et syntaxe markdown)
+//   2. Observer les mutations du DOM via MutationObserver (Discord est une SPA React)
+//   3. Envoyer les emojis détectés au service worker via chrome.runtime.sendMessage
+//   4. Répondre aux messages de background.js (clic droit) et du popup (auto-save)
 
 const AUTO_SYNC_STORAGE_KEY = "emotevault_auto_sync_enabled";
 const AUTO_SYNC_SCAN_INTERVAL_MS = 5000;
@@ -10,6 +15,8 @@ let autoSyncTimeout = null;
 let autoSyncInterval = null;
 let lastAutoSyncSignature = "";
 
+// customEmoji : parse <:name:id> (statique) et <a:name:id> (animé) dans le texte des messages
+// emojiCdnUrl : extrait l'ID et l'extension depuis une URL CDN Discord
 const DISCORD_EMOJI_REGEX = {
   customEmoji: /<(?<animated>a?):(?<name>[\w-]+):(?<id>\d{15,25})>/g,
   emojiCdnUrl: /(?:cdn\.discordapp\.com|media\.discordapp\.net)\/emojis\/(?<id>\d{15,25})\.(?<extension>webp|png|gif|jpg|jpeg)/i,
@@ -102,6 +109,8 @@ function scanEmojiImages(root = document) {
   return emojis;
 }
 
+// Parse la syntaxe markdown Discord <:name:id> et <a:name:id> dans le texte brut des messages.
+// Capture les emojis même quand ils ne sont pas rendus comme des images dans le DOM.
 function extractFromText(text) {
   const results = [];
   const regex = new RegExp(DISCORD_EMOJI_REGEX.customEmoji);
@@ -220,7 +229,8 @@ function collectVisibleDiscordEmojis(root = document) {
   const fromPicker = scanEmojiPickerWithServers();
   const byId = new Map();
 
-  // fromPicker en dernier : son info serveur (précise) écrase celle du scan générique
+  // Merge des trois sources : fromPicker est traité en dernier car son association
+  // serveur (issue du sélecteur d'emojis) est plus précise et doit écraser les autres.
   [...fromImages, ...fromText, ...fromPicker].forEach((emoji) => {
     const previous = byId.get(emoji.id) || {};
     byId.set(emoji.id, {
@@ -233,6 +243,8 @@ function collectVisibleDiscordEmojis(root = document) {
   return Array.from(byId.values());
 }
 
+// Construit une empreinte de l'état courant des emojis visibles.
+// Permet d'éviter un appel API si rien n'a changé depuis la dernière sync.
 function buildEmojiSignature(emojis) {
   return emojis
     .map((emoji) => `${emoji.id}:${emoji.name || ""}:${emoji.animated ? "1" : "0"}:${emoji.server_id || ""}:${emoji.server_name || ""}`)
@@ -269,6 +281,8 @@ function sendVisibleDiscordEmojisToBackground() {
   });
 }
 
+// Debounce de 900 ms : regroupe les mutations DOM rapides en un seul scan.
+// Évite d'appeler collectVisibleDiscordEmojis à chaque mutation individuelle.
 function scheduleAutoSync() {
   if (!autoSyncEnabled) {
     return;
@@ -285,6 +299,9 @@ function startAutoSyncObserver() {
     return;
   }
 
+  // MutationObserver sur tout le body pour détecter les changements de contenu.
+  // subtree: true capture les modifications à n'importe quelle profondeur du DOM.
+  // attributeFilter limite les déclenchements aux attributs portant les métadonnées d'emojis.
   autoSyncObserver = new MutationObserver(scheduleAutoSync);
   autoSyncObserver.observe(document.body, {
     childList: true,
@@ -354,6 +371,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return false;
 });
 
+// Discord est une SPA : document.body peut ne pas exister au moment de l'injection du script.
+// On attend sa disponibilité par polling avant de démarrer l'auto-sync.
 function bootAutoSyncWhenReady() {
   if (!document.body) {
     globalThis.setTimeout(bootAutoSyncWhenReady, 250);
@@ -471,6 +490,7 @@ function handleExtractServerEmojis(sendResponse) {
   }
 }
 
+// Messages envoyés par background.js (clic droit) et popup.js (extraction manuelle).
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === "emotevault_save_asset" && request.srcUrl) {
     handleSaveAsset(request.srcUrl);

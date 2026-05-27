@@ -1,4 +1,9 @@
-// server.js - API REST EmoteVault
+// server.js — Point d'entrée de l'API REST EmoteVault.
+// Gère : authentification (création/login bcrypt), CRUD emojis, filtrage et tri.
+// TODO: remplacer l'auth par JWT avec middleware (actuellement user_id géré côté client)
+// TODO: ajouter rate limiting (ex : express-rate-limit) sur les routes sensibles
+// TODO: dockeriser le backend
+// TODO: ajouter tests (Jest + Supertest)
 
 process.on('uncaughtException', function (err) {
   console.error('Uncaught Exception:', err);
@@ -16,11 +21,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'http://localhost';
 
+// Ne pas exposer la version d'Express dans les headers de réponse.
 app.disable('x-powered-by');
 
 app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
 app.use(express.json());
 
+// Retourne l'utilisateur sans password_hash — ne jamais exposer le hash en réponse API.
 function sanitizeUser(user) {
   const { password_hash, ...safe } = user;
   return safe;
@@ -37,6 +44,7 @@ app.get('/api/health', (_req, res) => {
 });
 
 // POST /api/users — create or login with password
+// Crée le compte si le username n'existe pas, sinon vérifie le mot de passe (bcrypt).
 app.post('/api/users', async (req, res) => {
   const { username, password } = req.body;
   if (!username) return res.status(400).json({ error: 'username required' });
@@ -47,6 +55,7 @@ app.post('/api/users', async (req, res) => {
 
     if (user) {
       if (user.password_hash) {
+        // bcrypt.compare hache le mot de passe entrant et le compare au hash stocké.
         const valid = await bcrypt.compare(password, user.password_hash);
         if (!valid) return res.status(401).json({ error: 'Invalid password.' });
       } else {
@@ -61,7 +70,7 @@ app.post('/api/users', async (req, res) => {
       return res.json({ user: sanitizeUser(user) });
     }
 
-    // New user
+    // Nouveau compte : hash avec bcrypt, salt cost 10 (bon compromis sécurité/performance).
     const hash = await bcrypt.hash(password, 10);
     const { rows } = await db.query(
       'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING *',
@@ -92,6 +101,8 @@ app.patch('/api/users/:id', async (req, res) => {
       if (!valid) return res.status(401).json({ error: 'Invalid password.' });
     }
 
+    // Construction dynamique du SET SQL avec indices de paramètres ($1, $2...).
+    // Permet de mettre à jour username et/ou password dans une seule requête paramétrée.
     const sets = [];
     const params = [];
 
@@ -125,6 +136,7 @@ app.patch('/api/users/:id', async (req, res) => {
 });
 
 // GET /api/assets
+// TODO: ajouter pagination serveur (LIMIT/OFFSET) — actuellement tous les assets sont retournés.
 app.get('/api/assets', async (req, res) => {
   const user_id = req.query.user_id;
   if (!user_id) return res.status(400).json({ error: 'user_id required' });
@@ -134,6 +146,9 @@ app.get('/api/assets', async (req, res) => {
   const server_id = req.query.server_id;
   const sort = req.query.sort || 'recent';
 
+  // Construction dynamique du WHERE : paramIndex évite les conflits d'indices $N
+  // lors de l'ajout conditionnel de filtres. Les requêtes paramétrées ($1, $2...)
+  // protègent contre les injections SQL.
   let query = 'SELECT * FROM assets WHERE user_id = $1';
   const params = [user_id];
   let paramIndex = 2;
@@ -185,12 +200,15 @@ app.post('/api/assets', async (req, res) => {
   }
 
   try {
+    // Vérification de doublon par (user_id, image_url).
     const exists = await db.query(
       'SELECT id, server_id, server_name FROM assets WHERE user_id = $1 AND image_url = $2',
       [user_id, image_url]
     );
     if (exists.rows.length > 0) {
       const existing = exists.rows[0];
+      // Si l'emoji existe mais sans association serveur, on l'enrichit silencieusement
+      // plutôt que de rejeter : l'auto-save peut découvrir le serveur plus tard.
       if ((server_id || server_name) && !existing.server_id && !existing.server_name) {
         const { rows: updated } = await db.query(
           'UPDATE assets SET server_id = $1, server_name = $2, updated_at = now() WHERE id = $3 RETURNING *',
