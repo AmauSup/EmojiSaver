@@ -1,120 +1,107 @@
-# EmoteVault Extension
-Extension navigateur WebExtension (Manifest V3) permettant de sauvegarder et organiser des emojis Discord personnalisés.
-## Fichiers principaux
-- `manifest.json` — configuration de l’extension (v1.0.0)
-- `popup.html` / `popup.js` / `popup.css` — interface utilisateur
-- `background.js` — service worker (menu contextuel, relay API)
-- `content.js` — script injecté dans Discord Web
-## Fonctionnalités
-### Popup
-- Connexion / déconnexion (username + password)
-- Recherche d’emojis par nom
-- Filtrage par serveur d’origine
-- Tri : Recent, A→Z, Z→A, Serveur A→Z, Serveur Z→A
-- Filtre favoris (étoile)
-- Sélection multiple et suppression en masse
-- Pagination (20 emojis par page)
-- Discord Emoji Builder : saisir un ID et un nom, prévisualiser, copier le lien CDN, sauvegarder
-- Auto-save : capture automatique des emojis visibles (toutes les 3,5 secondes)
-- Gestion du compte : modifier le nom d’utilisateur ou le mot de passe
-### Détection des emojis
-- Scan du DOM à la recherche d’images CDN Discord
-- Parsing de la syntaxe markdown `<:name:id>` et `<a:name:id>` (animés)
-- Détection des emojis dans le sélecteur d’emojis avec association au serveur
-- MutationObserver pour les changements dynamiques du DOM
-### Menu contextuel (clic droit)
-- “Save to EmoteVault” — sauvegarde l’emoji cliqué
-- “Copy Discord format (`<:name:id>`)” — copie la syntaxe Discord
-## Technologies utilisées
-# EmoteVault Extension
+# EmoteVault — Extension
 
-Extension navigateur WebExtension (Manifest V3) permettant de sauvegarder et organiser des emojis Discord personnalisés.
+Extension navigateur WebExtension (Manifest V3) permettant de sauvegarder et organiser les emojis personnalisés Discord.
 
 ## Fichiers principaux
 
-- `manifest.json` — configuration de l’extension (v1.0.0)
-- `popup.html` / `popup.js` / `popup.css` — interface utilisateur
-- `background.js` — service worker (menu contextuel, relay API)
-- `content.js` — script injecté dans Discord Web
+### `manifest.json`
 
-## Fonctionnalités
+Fichier de configuration de l'extension (Manifest V3).
 
-### Popup
+Déclare :
+- les **permissions** : `contextMenus`, `storage`, `activeTab`, `scripting`
+- les **host_permissions** : `discord.com`, `discordapp.com`, `cdn.discordapp.com`, `media.discordapp.net`
+- le **service worker** : `background.js`
+- le **content script** : `content.js` injecté sur toutes les pages Discord
+- l'**action popup** : `popup.html`
 
-- Connexion / déconnexion (username + password)
-- Recherche d’emojis par nom
-- Filtrage par serveur d’origine
-- Tri : Recent, A→Z, Z→A, Serveur A→Z, Serveur Z→A
-- Filtre favoris (étoile)
-- Sélection multiple et suppression en masse
-- Pagination (20 emojis par page)
-- Discord Emoji Builder : saisir un ID et un nom, prévisualiser, copier le lien CDN, sauvegarder
-- Auto-save : capture automatique des emojis visibles (toutes les 3,5 secondes)
-- Gestion du compte : modifier le nom d’utilisateur ou le mot de passe
+### `background.js`
 
-### Détection des emojis
+Service worker (remplace la background page persistante de Manifest V2).
 
-- Scan du DOM à la recherche d’images CDN Discord
-- Parsing de la syntaxe markdown `<:name:id>` et `<a:name:id>` (animés)
-- Détection des emojis dans le sélecteur d’emojis avec association au serveur
-- MutationObserver pour les changements dynamiques du DOM
+Responsabilités :
+- Création et gestion du **menu contextuel** (clic droit sur une image)
+- Réception des messages du content script via `chrome.runtime.onMessage`
+- **Relay des appels API** vers le backend Express (`http://localhost:3000`)
+- Sauvegarde d'un emoji unique (`save-asset`) et d'un lot d'emojis (`save-assets-bulk`)
 
-### Menu contextuel (clic droit)
+> Le service worker est réveillé à la demande et peut s'endormir entre deux événements — c'est une contrainte Manifest V3.
 
-- “Save to EmoteVault” — sauvegarde l’emoji cliqué
-- “Copy Discord format (`<:name:id>`)” — copie la syntaxe Discord
+### `content.js`
 
-## Technologies utilisées
+Script injecté dans chaque page Discord Web.
 
-- JavaScript Vanilla
-- WebExtension Manifest V3
-- chrome.storage.local
-- MutationObserver
+Responsabilités :
+- **Scan du DOM** : détection des images CDN Discord (`cdn.discordapp.com/emojis/`) dans les messages
+- **Parsing markdown** : extraction des emojis depuis la syntaxe `<:name:id>` (statique) et `<a:name:id>` (animé)
+- **Scan du sélecteur d'emojis Discord** : détection avec association au serveur d'origine
+- **MutationObserver** : surveillance des changements DOM en temps réel (Discord est une SPA React — le DOM est modifié dynamiquement sans rechargement de page)
+- Envoi des emojis détectés au service worker via `chrome.runtime.sendMessage`
+- Réponse aux messages de polling depuis le popup (auto-save)
 
-## Permissions
+### `popup.js`
 
-- `contextMenus`, `storage`, `activeTab`, `scripting`
-- Host permissions : `discord.com`, `discordapp.com`, `media.discordapp.net`, `cdn.discordapp.com`
+Logique de l'interface utilisateur (popup de l'extension).
 
-## Stockage local (chrome.storage.local)
+Responsabilités :
+- **Authentification** : connexion / déconnexion, persistance de la session via `chrome.storage.local`
+- **Affichage de la bibliothèque** : récupération des emojis depuis le backend, rendu paginé (20 par page)
+- **Recherche, filtrage, tri** : filtres appliqués côté client avant affichage
+- **Auto-save** : déclenchement périodique (toutes les 3,5 s) — envoie un message au content script pour demander les emojis actuellement visibles, puis les sauve en batch
+- **Discord Emoji Builder** : prévisualisation d'un emoji par ID et nom, sans naviguer sur le serveur
+- **Gestion du compte** : modification du nom d'utilisateur et du mot de passe
+- **Sélection multiple** : suppression en masse via des requêtes DELETE successives
+
+## Fonctionnement du clic droit
+
+1. L'utilisateur fait un clic droit sur une image d'emoji sur Discord Web
+2. Le **menu contextuel** affiché par `background.js` propose :
+   - **"Save to EmoteVault"** — appelle `POST /api/assets` avec l'URL de l'image
+   - **"Copy Discord format (`<:name:id>`)"** — copie la syntaxe Discord dans le presse-papier via `chrome.scripting.executeScript`
+3. Le nom et l'ID de l'emoji sont extraits depuis l'attribut `alt` ou l'URL CDN de l'image
+
+## Fonctionnement de l'auto-save
+
+1. L'utilisateur active l'auto-save dans le popup (interrupteur)
+2. `popup.js` déclenche un intervalle toutes les **3 500 ms**
+3. À chaque tick, `popup.js` envoie un message `get-page-emojis` au `content.js` de l'onglet actif
+4. `content.js` scanne le DOM, extrait tous les emojis visibles et les retourne
+5. `popup.js` appelle `POST /api/assets` pour chaque emoji non encore sauvegardé
+6. Le backend retourne 409 pour les doublons — ils sont ignorés silencieusement
+
+## Limites liées au scraping DOM Discord
+
+Discord est une **SPA React** dont le DOM n'est pas prévu pour être inspecté par des tiers :
+
+- La structure des classes CSS (ex : `alt` des images) peut changer sans préavis lors des mises à jour Discord
+- Les emojis ne sont visibles dans le DOM que s'ils sont dans la zone visible (virtualisation React)
+- Le sélecteur d'emojis Discord n'expose pas directement l'ID du serveur d'origine — l'association est déduite du contexte DOM environnant
+- Certains emojis intégrés dans les réactions ne sont pas toujours captés (structure DOM différente)
+- Aucune utilisation de l'API officielle Discord (non autorisée pour ce type d'usage)
+
+## Stockage local (`chrome.storage.local`)
 
 | Clé | Description |
 |-----|-------------|
-| `emotevault_user_id` | UUID de l’utilisateur connecté |
-| `emotevault_username` | Nom d’utilisateur |
-| `emotevault_auto_sync_enabled` | État de l’auto-save (booléen) |
+| `emotevault_user_id` | UUID de l'utilisateur connecté |
+| `emotevault_username` | Nom d'utilisateur affiché |
+| `emotevault_auto_sync_enabled` | État de l'auto-save (`true` / `false`) |
 
-## Architecture
+## Installation en mode développeur
 
-```text
-Discord Web
-↓
-content.js (détection emojis, MutationObserver)
-↓
-background.js (service worker, menu contextuel, appels API)
-↔
-popup.js (interface utilisateur)
-↓
-Backend Express.js (http://localhost:3000)
-```
+1. Lancer le backend (`npm run dev` dans `backend/`)
+2. Ouvrir **Chrome, Edge ou Brave**
+3. Naviguer vers `chrome://extensions`
+4. Activer le **mode développeur** (interrupteur en haut à droite)
+5. Cliquer sur **"Charger l'extension non empaquetée"**
+6. Sélectionner le dossier `extension/`
+7. L'icône EmoteVault apparaît dans la barre d'extensions
 
-## Installation
-
-1. Lancer le backend sur `http://localhost:3000`
-2. Ouvrir Chrome / Edge / Brave
-3. Aller dans `Extensions`
-4. Activer le mode développeur
-5. Cliquer sur “Charger l’extension non empaquetée”
-6. Sélectionner le dossier `/extension`
-
-## Notes techniques
-
-- Les emojis sont récupérés via les URLs CDN Discord publiques (`cdn.discordapp.com`)
-- Pas d’utilisation de l’API officielle Discord
-- `BACKEND_URL` est codé en dur à `http://localhost:3000` dans `popup.js` et `background.js`
+Pour mettre à jour l'extension après une modification de code : cliquer sur l'icône de rechargement dans `chrome://extensions`.
 
 ## Limitations
 
-- Fonctionne uniquement avec Discord Web
-- Nécessite un backend local actif
+- Fonctionne uniquement avec **Discord Web** (pas l'application desktop Electron)
+- Nécessite un **backend local actif** sur `http://localhost:3000`
+- `BACKEND_URL` est codé en dur dans `popup.js` et `background.js` — à externaliser pour un déploiement cloud
 - Non publié sur le Chrome Web Store
