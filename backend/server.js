@@ -5,9 +5,11 @@
 // TODO: dockeriser le backend
 // TODO: ajouter tests (Jest + Supertest)
 
+// Capture les exceptions non interceptées pour éviter un crash silencieux du process.
 process.on('uncaughtException', function (err) {
   console.error('Uncaught Exception:', err);
 });
+// Capture les promesses rejetées sans catch explicite.
 process.on('unhandledRejection', function (reason, promise) {
   console.error('Unhandled Rejection:', reason);
 });
@@ -33,6 +35,7 @@ function sanitizeUser(user) {
   return safe;
 }
 
+// Récupère un utilisateur par son username (ou null si absent).
 async function getUserByUsername(username) {
   const { rows } = await db.query('SELECT * FROM users WHERE username = $1', [username]);
   return rows[0] || null;
@@ -45,6 +48,7 @@ app.get('/api/health', (_req, res) => {
 
 // POST /api/users — create or login with password
 // Crée le compte si le username n'existe pas, sinon vérifie le mot de passe (bcrypt).
+// Sert de point d'entrée d'authentification (création de compte ou connexion).
 app.post('/api/users', async (req, res) => {
   const { username, password } = req.body;
   if (!username) return res.status(400).json({ error: 'username required' });
@@ -84,6 +88,7 @@ app.post('/api/users', async (req, res) => {
 });
 
 // PATCH /api/users/:id — update username and/or password
+// Met à jour username et/ou mot de passe après vérification du mot de passe actuel.
 app.patch('/api/users/:id', async (req, res) => {
   const { id } = req.params;
   const { current_password, new_username, new_password } = req.body;
@@ -137,6 +142,7 @@ app.patch('/api/users/:id', async (req, res) => {
 
 // GET /api/assets
 // TODO: ajouter pagination serveur (LIMIT/OFFSET) — actuellement tous les assets sont retournés.
+// Liste les assets d'un utilisateur avec filtres optionnels et tri.
 app.get('/api/assets', async (req, res) => {
   const user_id = req.query.user_id;
   if (!user_id) return res.status(400).json({ error: 'user_id required' });
@@ -192,6 +198,7 @@ app.get('/api/assets', async (req, res) => {
 });
 
 // POST /api/assets
+// Crée un asset emoji pour un utilisateur, avec détection de doublon et enrichissement serveur.
 app.post('/api/assets', async (req, res) => {
   const { user_id, image_url, platform, name, server_id, server_name, is_animated, is_favorite } = req.body;
 
@@ -231,6 +238,7 @@ app.post('/api/assets', async (req, res) => {
 });
 
 // PATCH /api/assets/:id
+// Met à jour les champs éditables d'un asset (nom et/ou favori).
 app.patch('/api/assets/:id', async (req, res) => {
   const { id } = req.params;
   const { name, is_favorite } = req.body;
@@ -262,6 +270,7 @@ app.patch('/api/assets/:id', async (req, res) => {
 });
 
 // DELETE /api/assets/:id
+// Supprime un asset par son identifiant.
 app.delete('/api/assets/:id', async (req, res) => {
   const { id } = req.params;
   try {
@@ -273,6 +282,7 @@ app.delete('/api/assets/:id', async (req, res) => {
   }
 });
 
+// Démarre le serveur HTTP Express sur le port configuré.
 app.listen(PORT, () => {
   console.log(`EmoteVault backend running on port ${PORT}`);
 });

@@ -23,11 +23,13 @@ const DISCORD_EMOJI_REGEX = {
   emojiName: /^:?(?<name>[\w-]+):?$/
 };
 
+// Normalise l'URL CDN d'un emoji Discord avec un format stable (gif/webp + paramètres).
 function normalizeEmojiUrl(id, animated) {
   const extension = animated ? "gif" : "webp";
   return `https://cdn.discordapp.com/emojis/${id}.${extension}?size=48&quality=lossless`;
 }
 
+// Déduit le serveur Discord courant (id + nom) à partir de l'URL, du titre et du DOM.
 function getDiscordServerOrigin() {
   const pathSegments = globalThis.location.pathname.split("/").filter(Boolean);
   const isDiscordChannelsPath = pathSegments[0] === "channels";
@@ -68,6 +70,7 @@ function getDiscordServerOrigin() {
   };
 }
 
+// Extrait un nom d'emoji à partir des attributs texte d'une image (alt, aria-label, title).
 function getEmojiNameFromImage(img) {
   const candidates = [
     img.getAttribute("alt"),
@@ -85,6 +88,7 @@ function getEmojiNameFromImage(img) {
   return "";
 }
 
+// Scanne les images emoji visibles dans un nœud DOM et retourne les métadonnées détectées.
 function scanEmojiImages(root = document) {
   const emojis = [];
   const serverOrigin = getDiscordServerOrigin();
@@ -223,6 +227,7 @@ function getServerOriginForEmojiInPicker(emojiUrl) {
   return null;
 }
 
+// Agrège toutes les sources d'emojis visibles (images, texte, picker) et déduplique par id.
 function collectVisibleDiscordEmojis(root = document) {
   const fromImages = scanEmojiImages(root);
   const fromText = extractFromText(document.body?.innerText || "");
@@ -252,6 +257,7 @@ function buildEmojiSignature(emojis) {
     .join("|");
 }
 
+// Envoie au service worker les emojis visibles si l'auto-sync est actif et si l'état a changé.
 function sendVisibleDiscordEmojisToBackground() {
   if (!autoSyncEnabled) {
     return;
@@ -294,6 +300,7 @@ function scheduleAutoSync() {
   }, 900);
 }
 
+// Démarre l'observation DOM et le scan périodique pour l'auto-sync des emojis.
 function startAutoSyncObserver() {
   if (autoSyncObserver || !document.body) {
     return;
@@ -317,6 +324,7 @@ function startAutoSyncObserver() {
   }
 }
 
+// Arrête proprement les timers/observer de l'auto-sync et réinitialise l'empreinte.
 function stopAutoSyncObserver() {
   globalThis.clearTimeout(autoSyncTimeout);
   autoSyncTimeout = null;
@@ -333,6 +341,7 @@ function stopAutoSyncObserver() {
   }
 }
 
+// Active ou désactive l'auto-sync et démarre/arrête les mécanismes associés.
 function setAutoSyncEnabled(enabled) {
   autoSyncEnabled = enabled;
 
@@ -344,6 +353,7 @@ function setAutoSyncEnabled(enabled) {
   }
 }
 
+// Charge la préférence d'auto-sync depuis le storage local de l'extension.
 function loadAutoSyncSetting() {
   chrome.storage.local.get([AUTO_SYNC_STORAGE_KEY], (result) => {
     setAutoSyncEnabled(!!result[AUTO_SYNC_STORAGE_KEY]);
@@ -382,6 +392,7 @@ function bootAutoSyncWhenReady() {
   loadAutoSyncSetting();
 }
 
+// Détermine la plateforme source d'une image à partir de son URL.
 function detectPlatform(url) {
   if (/cdn.discordapp.com|media.discordapp.net/.test(url)) return "discord";
   if (/twitch.tv|jtvnw.net|twimg.com/.test(url)) return "twitch";
@@ -390,6 +401,7 @@ function detectPlatform(url) {
   return "other";
 }
 
+// Tente de classifier le type d'asset à partir de l'URL (gif, emoji, image).
 function detectAssetType(url) {
   if (/\.gif($|\?)/i.test(url)) return "gif";
   if (/emote|emoji/i.test(url)) return "emoji";
@@ -397,10 +409,12 @@ function detectAssetType(url) {
   return "image";
 }
 
+// Indique si l'asset est animé en se basant sur l'extension .gif.
 function isAnimated(url) {
   return /\.gif($|\?)/i.test(url);
 }
 
+// Extrait l'id/nom d'un emoji Discord depuis son URL et éventuellement depuis l'image DOM associée.
 function getDiscordEmojiMetaFromUrl(image_url) {
   if (!/cdn.discordapp.com\/emojis\/(\d+)/.test(image_url)) {
     return { emoji_id: null, emoji_name: null };
@@ -420,6 +434,7 @@ function getDiscordEmojiMetaFromUrl(image_url) {
   return { emoji_id, emoji_name, imgNode: imgs[0] };
 }
 
+// Délègue la sauvegarde d'un asset au service worker via message runtime.
 function sendAssetToBackground(asset) {
   chrome.runtime.sendMessage({ type: "SAVE_ASSET", asset }, (response) => {
     if (!response?.success) {
@@ -428,6 +443,7 @@ function sendAssetToBackground(asset) {
   });
 }
 
+// Prépare les métadonnées d'une image puis lance la sauvegarde (action clic droit).
 function handleSaveAsset(srcUrl) {
   const image_url = srcUrl;
   const platform = detectPlatform(image_url);
@@ -456,6 +472,7 @@ function handleSaveAsset(srcUrl) {
   });
 }
 
+// Construit et copie la syntaxe Discord (<:name:id> ou <a:name:id>) pour un emoji.
 function handleCopyDiscordFormat(srcUrl) {
   const image_url = srcUrl;
   const platform = detectPlatform(image_url);
@@ -481,6 +498,7 @@ function handleCopyDiscordFormat(srcUrl) {
   });
 }
 
+// Retourne au popup la liste des emojis détectés dans l'onglet Discord courant.
 function handleExtractServerEmojis(sendResponse) {
   try {
     const emojis = collectVisibleDiscordEmojis();

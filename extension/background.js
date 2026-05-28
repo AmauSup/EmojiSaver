@@ -11,6 +11,7 @@
 
 // Les menus contextuels doivent être (re)créés dans onInstalled.
 // En MV3, le service worker peut redémarrer et perdre les menus s'ils sont créés ailleurs.
+// Initialise les deux actions de menu contextuel au moment de l'installation de l'extension.
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.create({
     id: "emotevault-save-asset",
@@ -26,6 +27,7 @@ chrome.runtime.onInstalled.addListener(() => {
 
 // Le service worker ne peut pas accéder au DOM directement.
 // Il délègue l'action au content script via chrome.tabs.sendMessage.
+// Route un clic de menu contextuel vers l'action correspondante dans l'onglet actif.
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === "emotevault-save-asset") {
     chrome.tabs.sendMessage(tab.id, {
@@ -40,6 +42,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
+// Point d'entrée des messages internes de l'extension (save unitaire et save en lot).
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // SAVE_ASSET : sauvegarde un emoji unique (clic droit ou Discord Builder).
   // L'user_id est lu depuis chrome.storage.local (pas de JWT pour l'instant).

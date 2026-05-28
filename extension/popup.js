@@ -63,15 +63,18 @@ const dom = {
   pageInfo: document.getElementById("page-info")
 };
 
+// Affiche ou masque un élément via la classe CSS `hidden`.
 function setHidden(element, hidden) {
   element.classList.toggle("hidden", hidden);
 }
 
+// Tronque un nom trop long pour l'affichage dans la liste.
 function truncateName(value) {
   if ((value || "").length <= MAX_NAME_LENGTH) return value;
   return `${value.slice(0, MAX_NAME_LENGTH - 1)}…`;
 }
 
+// Normalise le nom d'emoji saisi (espaces, caractères autorisés, longueur max).
 function normalizeDiscordEmojiName(rawName) {
   return (rawName || "")
     .trim()
@@ -80,6 +83,7 @@ function normalizeDiscordEmojiName(rawName) {
     .slice(0, 120);
 }
 
+// Construit une URL CDN Discord vers l'emoji demandé (gif/webp).
 function buildDiscordEmojiUrl(emojiId, emojiName, extension) {
   const encodedName = encodeURIComponent(emojiName);
   return `https://cdn.discordapp.com/emojis/${emojiId}.${extension}?size=48&name=${encodedName}&lossless=true`;
@@ -98,6 +102,7 @@ async function apiRequest(path, options = {}) {
   return body;
 }
 
+// Crée/connecte un utilisateur via l'API backend.
 async function createOrLoginUser(username, password) {
   const body = await apiRequest("/api/users", {
     method: "POST",
@@ -108,6 +113,7 @@ async function createOrLoginUser(username, password) {
   return body.user;
 }
 
+// Charge la liste des assets de l'utilisateur connecté (avec filtre favori si activé).
 async function fetchAssetsForUser() {
   const params = new URLSearchParams({ user_id: state.userId });
   if (dom.favFilter.checked) {
@@ -118,6 +124,7 @@ async function fetchAssetsForUser() {
   return body.assets || [];
 }
 
+// Crée un nouvel asset pour l'utilisateur courant.
 async function createAsset(assetPayload) {
   return apiRequest("/api/assets", {
     method: "POST",
@@ -126,6 +133,7 @@ async function createAsset(assetPayload) {
   });
 }
 
+// Met à jour un asset existant (nom/favori).
 async function updateAsset(assetId, payload) {
   return apiRequest(`/api/assets/${assetId}`, {
     method: "PATCH",
@@ -134,10 +142,12 @@ async function updateAsset(assetId, payload) {
   });
 }
 
+// Supprime un asset par son identifiant.
 async function deleteAsset(assetId) {
   return apiRequest(`/api/assets/${assetId}`, { method: "DELETE" });
 }
 
+// Convertit un emoji scanné depuis Discord vers le payload attendu par l'API.
 function mapScannedEmojiToAssetPayload(emoji) {
   const safeName = (emoji.name || `emoji_${emoji.id}`).trim();
   return {
@@ -150,14 +160,17 @@ function mapScannedEmojiToAssetPayload(emoji) {
   };
 }
 
+// Retourne le libellé serveur affichable pour un asset.
 function normalizeServerLabel(asset) {
   return asset.server_name || asset.server_id || "No server";
 }
 
+// Retourne une clé serveur stable utilisée pour le filtrage.
 function normalizeServerKey(asset) {
   return asset.server_id || "__unknown__";
 }
 
+// Reconstruit les options du filtre serveur à partir des assets chargés.
 function rebuildServerFilterOptions(assets) {
   const selected = dom.serverFilter.value || "";
   const byServer = new Map();
@@ -184,6 +197,7 @@ function rebuildServerFilterOptions(assets) {
   }
 }
 
+// Met à jour la barre d'actions groupées (compteur + état du select-all).
 function updateBulkBar() {
   const count = state.selectedIds.size;
   setHidden(dom.bulkBar, count === 0);
@@ -196,12 +210,14 @@ function updateBulkBar() {
   dom.selectAllCb.indeterminate = someChecked && !allChecked;
 }
 
+// Affiche la vue principale après authentification.
 function showMainView() {
   setHidden(dom.loginSection, true);
   setHidden(dom.mainSection, false);
   startLiveRefresh();
 }
 
+// Affiche la vue de connexion et stoppe les rafraîchissements.
 function showLoginView() {
   setHidden(dom.loginSection, false);
   setHidden(dom.mainSection, true);
@@ -210,6 +226,7 @@ function showLoginView() {
 
 // Rafraîchissement périodique pour refléter les emojis sauvegardés par l'auto-sync
 // ou le clic droit pendant que le popup est ouvert.
+// Démarre le timer de rafraîchissement périodique des assets.
 function startLiveRefresh() {
   stopLiveRefresh();
   state.liveRefreshTimer = globalThis.setInterval(() => {
@@ -219,18 +236,21 @@ function startLiveRefresh() {
   }, LIVE_REFRESH_INTERVAL_MS);
 }
 
+// Arrête le timer de rafraîchissement périodique.
 function stopLiveRefresh() {
   if (!state.liveRefreshTimer) return;
   globalThis.clearInterval(state.liveRefreshTimer);
   state.liveRefreshTimer = null;
 }
 
+// Persiste les infos utilisateur dans l'état local et le storage extension.
 function setUserData(user) {
   state.userId = user.id;
   state.username = user.username;
   chrome.storage.local.set({ emotevault_user_id: user.id, emotevault_username: user.username });
 }
 
+// Réinitialise le bloc Discord Builder (preview, boutons, message).
 function clearDiscordBuilder(message = "") {
   dom.discordLinkInput.value = "";
   dom.discordPreviewImage.removeAttribute("src");
@@ -242,6 +262,7 @@ function clearDiscordBuilder(message = "") {
   dom.discordSaveBtn.onclick = null;
 }
 
+// Vérifie qu'une image est chargeable à une URL donnée.
 function probeImage(url) {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -268,6 +289,7 @@ async function resolveDiscordEmojiAsset(emojiId, emojiName) {
 
 // Envoie un message au content script de l'onglet actif pour extraire les emojis visibles.
 // Vérifie d'abord que l'onglet est sur Discord (content.js n'est injecté que sur discord.com).
+// Extrait les emojis visibles depuis l'onglet Discord actif via le content script.
 function extractVisibleDiscordEmojisFromActiveTab() {
   return new Promise((resolve, reject) => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -304,6 +326,7 @@ function extractVisibleDiscordEmojisFromActiveTab() {
   });
 }
 
+// Sauvegarde en série une liste d'emojis extraits et agrège le résultat.
 async function saveExtractedEmojis(emojis) {
   let saved = 0;
   let duplicates = 0;
@@ -327,6 +350,7 @@ async function saveExtractedEmojis(emojis) {
 
 // Rendu paginé côté client (ITEMS_PER_PAGE = 20).
 // Tous les assets sont en mémoire ; la pagination ne déclenche pas de requête API.
+// Affiche la page courante des assets et met à jour la pagination.
 function renderAssets(assets) {
   dom.assetList.innerHTML = "";
 
@@ -381,6 +405,7 @@ function renderAssets(assets) {
 
 // Filtrage et tri entièrement côté client sur state.assets (déjà en mémoire).
 // Exception : le filtre favori déclenche un rechargement API car il est géré par le backend.
+// Applique filtres/tri côté client puis déclenche le rendu.
 function filterAndRenderAssets() {
   const query = dom.searchInput.value.toLowerCase();
   let filtered = [...state.assets];
@@ -408,6 +433,7 @@ function filterAndRenderAssets() {
   renderAssets(filtered);
 }
 
+// Recharge les assets depuis l'API puis remet à jour filtres et affichage.
 async function refreshAssets() {
   if (!state.userId) return;
 
@@ -420,6 +446,7 @@ async function refreshAssets() {
   }
 }
 
+// Gère le Discord Builder : validation, preview, copie et sauvegarde de l'emoji.
 async function handleDiscordBuilderClick() {
   const emojiId = dom.discordIdInput.value.trim();
   const emojiName = normalizeDiscordEmojiName(dom.discordNameInput.value) || "emoji";
@@ -469,6 +496,7 @@ async function handleDiscordBuilderClick() {
 // L'auto-save nécessite deux actions synchronisées :
 // 1. Mettre à jour chrome.storage.local (lu par content.js au prochain démarrage)
 // 2. Envoyer un message au content script pour activer/désactiver immédiatement
+// Active/désactive l'auto-save en storage et notifie l'onglet actif.
 async function handleAutoSaveClick() {
   if (!state.userId) {
     dom.autoSaveStatus.textContent = "Log in first.";
@@ -502,6 +530,7 @@ async function handleAutoSaveClick() {
   dom.autoSaveStatus.textContent = nextEnabled ? "Auto-save enabled." : "Auto-save disabled.";
 }
 
+// Charge l'état auto-save au démarrage du popup pour synchroniser le bouton.
 function loadAutoSaveState() {
   chrome.storage.local.get([AUTO_SYNC_STORAGE_KEY], (result) => {
     const enabled = !!result[AUTO_SYNC_STORAGE_KEY];
@@ -516,6 +545,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   dom.autoSaveServerBtn.textContent = enabled ? "Disable auto-save" : "Enable auto-save";
 });
 
+// Met à jour le username de l'utilisateur connecté.
 async function handleChangeUsername() {
   const newUsername = dom.newUsernameInput.value.trim();
   const currentPwd = dom.currentPwdInput.value;
@@ -539,6 +569,7 @@ async function handleChangeUsername() {
   }
 }
 
+// Met à jour le mot de passe de l'utilisateur connecté.
 async function handleChangePassword() {
   const currentPwd = dom.currentPwdInput.value;
   const newPwd = dom.newPwdInput.value;
@@ -561,6 +592,7 @@ async function handleChangePassword() {
   }
 }
 
+// Supprime tous les assets sélectionnés dans la vue courante.
 async function handleBulkDelete() {
   if (state.selectedIds.size === 0) return;
   dom.bulkDeleteBtn.disabled = true;
@@ -573,6 +605,7 @@ async function handleBulkDelete() {
   dom.bulkDeleteBtn.disabled = false;
 }
 
+// Sélectionne/désélectionne tous les éléments de la page courante.
 function handleSelectAll() {
   const pageCbs = dom.assetList.querySelectorAll(".select-cb");
   if (dom.selectAllCb.checked) {
@@ -583,6 +616,7 @@ function handleSelectAll() {
   updateBulkBar();
 }
 
+// Gère les actions sur la liste (select/copy/edit/delete/favorite) via délégation d'événement.
 async function handleAssetListClick(event) {
   const target = event.target;
 
@@ -625,6 +659,7 @@ async function handleAssetListClick(event) {
   }
 }
 
+// Gère la soumission du formulaire login/create account.
 async function handleLoginSubmit(event) {
   event.preventDefault();
   const username = dom.usernameInput.value.trim();
@@ -656,6 +691,7 @@ async function handleLoginSubmit(event) {
   }
 }
 
+// Déconnecte l'utilisateur courant et nettoie session + état local.
 function handleLogout() {
   chrome.storage.local.remove(["emotevault_user_id", "emotevault_username"], () => {
     state.userId = null;
@@ -666,6 +702,7 @@ function handleLogout() {
   });
 }
 
+// Branche tous les écouteurs d'événements UI du popup.
 function bindEvents() {
   dom.loginForm.addEventListener("submit", handleLoginSubmit);
   dom.logoutBtn.addEventListener("click", handleLogout);
@@ -701,6 +738,7 @@ function bindEvents() {
 
 // Restaure la session depuis chrome.storage.local si l'utilisateur était connecté.
 // Pas de vérification côté serveur : la session est valide tant que l'user_id existe en base.
+// Tente une reconnexion automatique à l'ouverture du popup.
 function tryAutoLogin() {
   chrome.storage.local.get(["emotevault_user_id", "emotevault_username"], (result) => {
     if (result.emotevault_user_id) {
